@@ -23,6 +23,11 @@ function XBee(options, data_parser) {
   this.heartbeat_packet = options.heartbeat_packet || '```';
   this.heartbeat_timeout = options.heartbeat_timeout || 8000;
 
+  // How long (in ms) shall we wait before deciding that a transmit hasn't been successful?
+  this.transmit_status_timeout = options.transmit_status_timeout || 1000;
+
+  if (options.api_mode) api.api_mode = options.api_mode;
+
   // Current nodes
   this.nodes = {};
 }
@@ -74,7 +79,6 @@ XBee.prototype.init = function(cb) {
 
   // AT Command Responses from remote AT Commands
   self._onRemoteCommandResponse = function(res) {
-    // On Node Discovery Packet, emit new Node
     if (self.nodes[res.remote64.hex]) {
       self.nodes[res.remote64.hex]._onRemoteCommandResponse(res);
     } else {
@@ -196,9 +200,10 @@ XBee.prototype._makeTask = function(packet) {
   return function Writer(cb) {
     //console.log("<<< "+util.inspect(packet.data));
     //console.log("<<< "+packet.data);
+
     var timeout = setTimeout(function() {
       cb({ msg: "Never got Transmit status from XBee" });
-    }, 1000);
+    }, self.transmit_status_timeout );
     self.serial.write(packet.data, function(err, results) {
       if (err) {
         cb(err);
@@ -239,6 +244,7 @@ XBee.prototype._send = function(data, remote64, remote16, _cb) {
 }
 
 XBee.prototype._AT = function(cmd, val, _cb) {
+  // val parameter is optional
   if (typeof val === 'function') {
     _cb = val;
     val = undefined;
@@ -256,23 +262,27 @@ XBee.prototype._AT = function(cmd, val, _cb) {
   return cbid;
 }
 
-/*
-XBee.prototype._remoteAT = function(cmd, remote64, remote16, val) {
-  var frame = new api.ATCommand();
+
+XBee.prototype._remoteAT = function(cmd, remote64, remote16, val, _cb) {
+  // val parameter is optional
+  if (typeof val === 'function') {
+    _cb = val;
+    val = undefined;
+  }
+
+  var frame = new api.RemoteATCommand();
   frame.setCommand(cmd);
   frame.commandParameter = val;
-  if (typeof remote64.dec === 'undefined') {
-    frame.destination64 = remote64;
-    frame.destination16 = remote16;
-  } else {
-    frame.destination64 = remote64.dec;
-    frame.destination16 = remote16.dec;
-  }
-  //console.log("USE QUEUE!");
-  this.serial.write(frame.getBytes());
-  return frame.frameId;
+  frame.destination64 = remote64.dec;
+  frame.destination16 = remote16.dec;
+  var cbid = C.FRAME_TYPE.REMOTE_COMMAND_RESPONSE + C.EVT_SEP + frame.frameId;
+  var packet = [this._makeTask({
+    data: frame.getBytes(),
+    cbid: cbid
+  })];
+  this._queue.push({ packets:packet, cb:_cb });
+  return cbid;
 }
-*/
 
 exports.XBee = XBee;
 
@@ -321,11 +331,18 @@ Node.prototype._onReceivePacket = function(data) {
     this.emit('data', packet);
 }
 
-/*
-Node.prototype._AT = function(cmd, val) {
-  this.xbee._remoteAT(cmd, this.remote64, this.remote16, val);
+Node.prototype.ATCommand = function(cmd, val, cb) {
+  // val parameter is optional
+  if (typeof val === "function") {
+    // use val as the callback in this case
+    this.xbee._remoteAT(cmd, this.remote64, this.remote16, val);
+  } else {
+    this.xbee._remoteAT(cmd, this.remote64, this.remote16, val, cb);
+  }
+
 }
 
+/*
 Node.prototype._onATResponse = function(res) {
   console.log("Node %s got AT_RESPONSE: %s", util.inspect(res));
 }
