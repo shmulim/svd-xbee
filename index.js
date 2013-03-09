@@ -133,7 +133,11 @@ XBee.prototype.configure = function(_done_cb) {
     f = typeof f !== 'undefined' ? f : function(a){return a};
     return function(cb) {
       self._AT(command, val, function(err, data) {
-        cb(err, f(data.commandData)); 
+        if (!err) {
+          cb(err, f(data.commandData));
+        } else {
+          console.log('XBee.configure.QF - ', err.msg);
+        }
       });
     }
   }
