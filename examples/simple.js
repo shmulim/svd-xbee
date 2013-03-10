@@ -1,5 +1,5 @@
 var util = require('util');
-var parser = require('./parser');
+var parser = require('./simple-parser.js');
 var XBee = require('../index.js').XBee;
 
 // Replace with your xbee's UART location
