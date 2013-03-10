@@ -1,9 +1,10 @@
 var util = require('util');
+var parser = require('./parser');
 var XBee = require('../index.js').XBee;
 
 // Replace with your xbee's UART location
-//var xbee = new XBee('/dev/ttyO1');
 var xbee = new XBee('/dev/ttyO1');
+//var xbee = new XBee('/dev/ttyO1', parser);
 xbee.init();
 
 xbee.on("configured", function(config) {

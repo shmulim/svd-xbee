@@ -1,5 +1,5 @@
 module.exports = function (device) {
-  var delimiter = "\r";
+  var delimiter = " ";
   function DataParser(device) {
     this.device = device;
     this.buffer = "";
