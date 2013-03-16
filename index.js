@@ -66,8 +66,8 @@ XBee.prototype.init = function(cb) {
   /* Frame-specific Handlers */
 
   // Whenever a node is identified (on ATND command).
-  self._onNodeDiscovery = function(data) {
-    var node = data.node;
+  self._onNodeDiscovery = function(node) {
+    if (node.node) node = node.node;
     if (!self.nodes[node.remote64.hex]) {
       self.nodes[node.remote64.hex] = new Node(self, node, self.data_parser);
       self.emit("newNodeDiscovered", self.nodes[node.remote64.hex]);
@@ -81,17 +81,17 @@ XBee.prototype.init = function(cb) {
   }
 
   // Modem Status
-  self._onModemStatus = function(res) {
+  self._onModemStatus = function(packet) {
     if (res.status == C.MODEM_STATUS.JOINED_NETWORK) {
-      self.emit("joinedNetwork");  
+      self.emit("joinedNetwork", packet);  
     } else if (res.status == C.MODEM_STATUS.HARDWARE_RESET) {
-      self.emit("hardwareReset");
+      self.emit("hardwareReset", packet);
     } else if (res.status == C.MODEM_STATUS.WATCHDOG_RESET) {
-      self.emit("watchdogReset");
+      self.emit("watchdogReset", packet);
     } else if (res.status == C.MODEM_STATUS.DISASSOCIATED) {
-      self.emit("disassociated");
+      self.emit("disassociated", packet);
     } else if (res.status == C.MODEM_STATUS.COORDINATOR_STARTED) {
-      self.emit("coordinatorStarted");
+      self.emit("coordinatorStarted", packet);
     } else {
       console.warn("Modem status: ", C.MODEM_STATUS[res.status]);
     }
@@ -146,9 +146,9 @@ XBee.prototype.readParameters = function(_done_cb) {
   var QF = function(command, val, f) { // Format the result using f
     f = typeof f !== 'undefined' ? f : function(a){return a};
     return function(cb) {
-      self._AT(command, val, function(err, data) {
+      self._AT(command, val, function(err, res) {
         if (!err) {
-          cb(err, f(data.commandData));
+          cb(err, f(res));
         } else {
           console.error('Error: XBee.readParameters.QF; ', err.msg);
         }
@@ -192,20 +192,25 @@ XBee.prototype.readParameters = function(_done_cb) {
 }
 
 // Add a node by hand.
-XBee.prototype.addNode = function(remote64) {
+XBee.prototype.addNode = function(remote64, parser) {
   var self = this;
   var remote16 = [0xff,0xfe]; // Unknown
-  var node = {
+  var node_data = {
     remote16: { dec: remote16, hex: api.tools.bArr2HexStr(remote16) },
     remote64: { dec: remote64, hex: api.tools.bArr2HexStr(remote64) }
   };
+  
+  var node = self.nodes[node_data.remote64.hex];
 
-  if (!self.nodes[node.remote64.hex]) {
-    self.nodes[node.remote64.hex] = new Node(self, node, self.data_parser);
-    self.nodes[node.remote64.hex].connected = false;
+  if (!node) {
+    node = self.nodes[node_data.remote64.hex] = new Node(self, node_data, self.data_parser);
+    node.connected = false;
   }
 
-  return self.nodes[node.remote64.hex];
+  if (typeof parser === "function")
+    node.parser = parser(node);
+
+  return node;
 }
 
 // Run network discovery. Associated nodes can report in
@@ -213,7 +218,9 @@ XBee.prototype.addNode = function(remote64) {
 XBee.prototype.discover = function(cb) {
   var self = this;
   var cbid = self._AT('ND');
-  self.serial.on(cbid, self._onNodeDiscovery);
+  self.serial.on(cbid, function(node) {
+    self._onNodeDiscovery(node.commandData);
+  })
   setTimeout(function() {
     if (typeof cb === 'function') cb(); 
     self.removeAllListeners(cbid);
@@ -242,16 +249,21 @@ XBee.prototype._makeTask = function(packet) {
       } else {
         //console.log(util.inspect(packet.data));
         if (results != packet.data.length) return cb(new Error("Not all bytes written"));
-        self.serial.once(packet.cbid, function(data) {
+        self.serial.once(packet.cbid, function(packet) {
           //console.log("Got Respones: "+packet.cbid);
           clearTimeout(timeout);
           var error = null;
-          if (data.commandStatus && data.commandStatus != C.COMMAND_STATUS.OK) {
-            error = C.COMMAND_STATUS[data.commandStatus];
-          } else if (data.deliveryStatus && data.deliveryStatus != C.DELIVERY_STATUS.SUCCESS) {
-            error = C.DELIVERY_STATUS[data.deliveryStatus];
+          if (packet.commandStatus !== undefined) {
+            if (packet.commandStatus != C.COMMAND_STATUS.OK) {
+              error = C.COMMAND_STATUS[packet.commandStatus];
+            }
+            packet = packet.commandData;
+          } else if (packet.deliveryStatus !== undefined) {
+            if (packet.deliveryStatus != C.DELIVERY_STATUS.SUCCESS) {
+              error = C.DELIVERY_STATUS[packet.deliveryStatus];
+            }
           }
-          cb(error, data);
+          cb(error, packet);
         });
       }
     });
@@ -357,15 +369,15 @@ Node.prototype.send = function(data, cb) {
   this.xbee._send(data, this.remote64, this.remote16, cb);
 }
 
-Node.prototype._onReceivePacket = function(data) {
+Node.prototype._onReceivePacket = function(packet) {
   // TODO: should be buffer all along!
-  var packet = new Buffer(data.rawData).toString('ascii');
-  if (this.xbee.use_heartbeat && packet === this.xbee.heartbeat_packet)
+  var data = new Buffer(packet.rawData).toString('ascii');
+  if (this.xbee.use_heartbeat && data === this.xbee.heartbeat_packet)
     this.refreshTimeout();
   else if (this.parser !== undefined)
-    this.parser.parse(packet);
+    this.parser.parse(data);
   else
-    this.emit('data', packet);
+    this.emit('data', data, packet);
 }
 
 Node.prototype.AT = function(cmd, val, cb) {
@@ -409,8 +421,8 @@ Node.prototype._onATResponse = function(res) {
 }
 */
 
-Node.prototype._onDataSampleRx = function(res) {
-  this.emit('io', res.ioSample);  
+Node.prototype._onDataSampleRx = function(packet) {
+  this.emit('io', packet.ioSample, packet);  
 }
 
 exports.Node = Node;
