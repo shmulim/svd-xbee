@@ -7,7 +7,7 @@ var os = require('os');
 
 var C = api.Constants;
 
-function XBee(options, data_parser) { 
+function XBee(options) { 
   EventEmitter.call(this);
 
   // Option Parsing
@@ -17,7 +17,9 @@ function XBee(options, data_parser) {
     this.options = options;
   }
 
-  this.data_parser = data_parser || options.data_parser || undefined;
+  this.tools = api.tools;
+
+  this.data_parser = options.data_parser || undefined;
 
   this.use_heartbeat = options.use_heartbeat || false;
   this.heartbeat_packet = options.heartbeat_packet || '```';
@@ -38,7 +40,7 @@ XBee.prototype.init = function(cb) {
   var self = this;
   // Serial connection to the XBee
   self.serial = new serialport.SerialPort(self.options.port, {
-    baudrate: self.options.baudrate || 57600,
+    baudrate: self.options.baudrate || 9600,
     databits: 8,
     stopbits: 1,
     parity: 'none',
@@ -46,7 +48,7 @@ XBee.prototype.init = function(cb) {
   });
 
   self.serial.on("open", function() {
-    self.configure.bind(self)(cb);
+    self.readParameters.bind(self)(cb);
   });
 
   var exit = function() { 
@@ -64,50 +66,66 @@ XBee.prototype.init = function(cb) {
   /* Frame-specific Handlers */
 
   // Whenever a node is identified (on ATND command).
-  self._onNodeIdentification = function(data) {
+  self._onNodeDiscovery = function(data) {
     var node = data.node;
     if (!self.nodes[node.remote64.hex]) {
       self.nodes[node.remote64.hex] = new Node(self, node, self.data_parser);
-      self.emit("node", self.nodes[node.remote64.hex]);
+      self.emit("newNodeDiscovered", self.nodes[node.remote64.hex]);
     } else {
       // update 16-bit address, as it may change during reconnects.
       self.nodes[node.remote64.hex].remote16 = node.remote16;
       self.nodes[node.remote64.hex].id = node.id;
-      self.nodes[node.remote64.hex].emit("reconnect");
+      self.nodes[node.remote64.hex].emit("discovered", self.nodes[node.remote64.hex]);
+    }
+    self.nodes[node.remote64.hex].connected = true;
+  }
+
+  // Modem Status
+  self._onModemStatus = function(res) {
+    if (res.status == C.MODEM_STATUS.JOINED_NETWORK) {
+      self.emit("joinedNetwork");  
+    } else if (res.status == C.MODEM_STATUS.HARDWARE_RESET) {
+      self.emit("hardwareReset");
+    } else if (res.status == C.MODEM_STATUS.WATCHDOG_RESET) {
+      self.emit("watchdogReset");
+    } else if (res.status == C.MODEM_STATUS.DISASSOCIATED) {
+      self.emit("disassociated");
+    } else if (res.status == C.MODEM_STATUS.COORDINATOR_STARTED) {
+      self.emit("coordinatorStarted");
+    } else {
+      console.warn("Modem status: ", C.MODEM_STATUS[res.status]);
     }
   }
 
-  // AT Command Responses from remote AT Commands
+  // Loose AT Command Responses from remote AT Commands.
+  // Should not arrive here if callback was passed to remote AT cmd.
   self._onRemoteCommandResponse = function(res) {
     if (self.nodes[res.remote64.hex]) {
       self.nodes[res.remote64.hex]._onRemoteCommandResponse(res);
-    } else {
-      console.log("Unhandled REMOTE_AT_RESPONSE: %s", util.inspect(res));
-    }
+    } 
   }
 
   // Messages
   self._onReceivePacket = function(data) {
     if (!self.nodes[data.remote64.hex]) {
       var _data = { node:data };
-      _data.node.id = "UNKNOWN";
-      self._onNodeIdentification(_data);
-      console.log("ERROR: Data from unknown node!");
+      self._onNodeDiscovery(_data);
     }
     self.nodes[data.remote64.hex]._onReceivePacket(data);
   }
 
   // Data samples (from XBee's I/O)
   self._onDataSampleRx = function(data) {
-    if (self.nodes[data.remote64.hex]) {
-      self.nodes[data.remote64.hex]._onDataSampleRx(data);
-    } else {
-      console.log("ERROR: Data sample from unknown node!");
+    if (!self.nodes[data.remote64.hex]) {
+      var _data = { node:data };
+      self._onNodeDiscovery(_data);
     }
+    self.nodes[data.remote64.hex]._onDataSampleRx(data);
   }
 
+  self.serial.on(C.FRAME_TYPE.MODEM_STATUS,             self._onModemStatus);
   self.serial.on(C.FRAME_TYPE.REMOTE_COMMAND_RESPONSE,  self._onRemoteCommandResponse);
-  self.serial.on(C.FRAME_TYPE.NODE_IDENTIFICATION,      self._onNodeIdentification);
+  self.serial.on(C.FRAME_TYPE.NODE_IDENTIFICATION,      self._onNodeDiscovery);
   self.serial.on(C.FRAME_TYPE.ZIGBEE_RECEIVE_PACKET,    self._onReceivePacket);
   self.serial.on(C.FRAME_TYPE.ZIGBEE_IO_DATA_SAMPLE_RX, self._onDataSampleRx);
   
@@ -119,13 +137,9 @@ XBee.prototype.init = function(cb) {
   }, 1);
 }
 
-XBee.prototype.configure = function(_done_cb) {
+XBee.prototype.readParameters = function(_done_cb) {
   var self = this;
-  /*
-  self._ATCB('ID', undefined, function(data) {
-    console.log("ID: "+util.inspect(data));
-  });
-  */
+
   // Returns a function that initiates an AT command to
   // query a configuration parameter's value. 
   // To be passed to an async.parallel.
@@ -136,38 +150,35 @@ XBee.prototype.configure = function(_done_cb) {
         if (!err) {
           cb(err, f(data.commandData));
         } else {
-          console.log('XBee.configure.QF - ', err.msg);
+          console.error('Error: XBee.readParameters.QF; ', err.msg);
         }
       });
     }
   }
 
-  var config = {
-    panid:             QF('ID', undefined, api.bArr2HexStr),
-    id:                QF('NI', undefined, api.bArr2Str),
-    sourceLow:         QF('SL', undefined, api.bArr2HexStr),
-    sourceHigh:        QF('SH', undefined, api.bArr2HexStr),
-    //maxPayloadSize:    QF('NP', api.bArr2HexStr), // Returns ERROR :/
-    setNodeDiscoveryTime: QF('NT', [0x96], function(a) { return "NT SET: "+api.bArr2Dec(a); }),
-    nodeDiscoveryTime: QF('NT', undefined, function(a) { return 100 * api.bArr2Dec(a); })
+  var parameters = {
+    panid:             QF('ID', undefined, api.tools.bArr2HexStr),
+    id:                QF('NI', undefined, api.tools.bArr2Str),
+    sourceHigh:        QF('SH', undefined, api.tools.bArr2HexStr),
+    sourceLow:         QF('SL', undefined, api.tools.bArr2HexStr),
+    nodeDiscoveryTime: QF('NT', undefined, function(a) { return 100 * api.tools.bArr2Dec(a); })
   };
   
   var done = function(err, results) {
     if (err) {
-      self.emit("error", new Error("Failure to configure XBee module: "+util.inspect(err)));
+      self.emit("error", new Error("Failure to read XBee params: "+util.inspect(err)));
       if (typeof _done_cb === 'function') _done_cb(err);
     }
-    self.config = results;
-    self.emit("configured", self.config);
-    if (typeof _done_cb === 'function') _done_cb(null, self.config);
-    self.discover();
+    self.parameters = results;
+    self.emit("initialized", self.parameters);
+    if (typeof _done_cb === 'function') _done_cb(null, self.parameters);
   }
 
-  // Using async to start discovery only when all parameters have been read.
-  var res_stop = Object.keys(config).length;
+  // Using async to read parameters
+  var res_stop = Object.keys(parameters).length;
   var results = {};
-  for (k in config) {
-    config[k]((function(key) {
+  for (k in parameters) {
+    parameters[k]((function(key) {
       return function(err, data) {
         if (err) return done(err, null);
         results[key] = data; 
@@ -180,17 +191,34 @@ XBee.prototype.configure = function(_done_cb) {
   }
 }
 
+// Add a node by hand.
+XBee.prototype.addNode = function(remote64) {
+  var self = this;
+  var remote16 = [0xff,0xfe]; // Unknown
+  var node = {
+    remote16: { dec: remote16, hex: api.tools.bArr2HexStr(remote16) },
+    remote64: { dec: remote64, hex: api.tools.bArr2HexStr(remote64) }
+  };
+
+  if (!self.nodes[node.remote64.hex]) {
+    self.nodes[node.remote64.hex] = new Node(self, node, self.data_parser);
+    self.nodes[node.remote64.hex].connected = false;
+  }
+
+  return self.nodes[node.remote64.hex];
+}
+
 // Run network discovery. Associated nodes can report in
 // for config.nodeDiscoveryTime ms.
 XBee.prototype.discover = function(cb) {
   var self = this;
-  // todo: could be nicer, pass _onNodeIdentification to _AT - but it's "once"...
   var cbid = self._AT('ND');
-  self.serial.on(cbid, self._onNodeIdentification);
+  self.serial.on(cbid, self._onNodeDiscovery);
   setTimeout(function() {
     if (typeof cb === 'function') cb(); 
     self.removeAllListeners(cbid);
-  }, self.config.nodeDiscoveryTime || 6000);
+    self.emit("discoveryEnd");
+  }, self.parameters.nodeDiscoveryTime || 6000);
 }
 
 XBee.prototype.broadcast = function(data, cb) {
@@ -247,6 +275,10 @@ XBee.prototype._send = function(data, remote64, remote16, _cb) {
   this._queue.push({ packets:packets, cb:_cb });
 }
 
+XBee.prototype.AT = function(cmd, val, _cb) {
+  this._AT(cmd, val, _cb);
+}
+
 XBee.prototype._AT = function(cmd, val, _cb) {
   // val parameter is optional
   if (typeof val === 'function') {
@@ -293,9 +325,10 @@ exports.XBee = XBee;
 function Node(xbee, params, data_parser) {
   EventEmitter.call(this);
   this.xbee = xbee;
-  this.id = params.id;
   this.remote16 = params.remote16;
   this.remote64 = params.remote64;
+  this.id = params.id || "";
+  this.deviceType = params.deviceType || -1;
   this.buffer = "";
   if (typeof data_parser === 'function')
     this.parser = data_parser(this);
@@ -335,25 +368,49 @@ Node.prototype._onReceivePacket = function(data) {
     this.emit('data', packet);
 }
 
-Node.prototype.ATCommand = function(cmd, val, cb) {
+Node.prototype.AT = function(cmd, val, cb) {
+  var cbid;
   // val parameter is optional
   if (typeof val === "function") {
     // use val as the callback in this case
-    this.xbee._remoteAT(cmd, this.remote64, this.remote16, val);
+    cbid = this.xbee._remoteAT(cmd, this.remote64, this.remote16, val);
   } else {
-    this.xbee._remoteAT(cmd, this.remote64, this.remote16, val, cb);
+    cbid = this.xbee._remoteAT(cmd, this.remote64, this.remote16, val, cb);
   }
 
+  /*
+  this.xbee.serial.on(cbid, function(res) {
+    console.log("Remote AT Response (2): ", util.inspect(err), util.inspect(res));
+  });
+  */
 }
+
+Node.prototype._onRemoteCommandResponse = function(res) {
+  console.warn("Remote Command Response not Implemented.", util.inspect(res));
+}
+
+
+Node.prototype.isCoordinator = function() {
+  return this.deviceType === C.DEVICE_TYPES.COORDINATOR;
+}
+
+Node.prototype.isRouter = function() {
+  return this.deviceType === C.DEVICE_TYPES.ROUTER;
+}
+
+Node.prototype.isEndDevice = function() {
+  return this.deviceType === C.DEVICE_TYPES.END_DEVICE
+}
+
 
 /*
 Node.prototype._onATResponse = function(res) {
   console.log("Node %s got AT_RESPONSE: %s", util.inspect(res));
 }
+*/
 
 Node.prototype._onDataSampleRx = function(res) {
-  this.emit('data_sample', res);  
+  this.emit('io', res.ioSample);  
 }
-*/
 
 exports.Node = Node;
