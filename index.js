@@ -356,7 +356,7 @@ XBee.prototype.setChangeDetection = function(pins, cb, remote) {
     this._AT("IC", val, cb);
 }
 
-XBee.prototype.setSampleRate = function(interval, cb, remote) {
+XBee.prototype.setSampleInterval = function(interval, cb, remote) {
   var _interval = Tools.dec2bArr(interval, 2);
   if (remote) 
     this._remoteAT("IR", remote.remote64, remote.remote16, _interval, cb);
@@ -427,7 +427,7 @@ XBee.prototype.getPinMode = function(pin, mode, cb, remote) {
 
   var _cb = function(err, res) {
     if (err) cb(err);
-    else cb(err, res[0]);
+    else cb(err, res[0]); // Or should we return the name of the mode?
   };
 
   if (remote) 
@@ -554,8 +554,8 @@ Node.prototype.setChangeDetection = function(pins, cb) {
   this.xbee.setChangeDetection(pins, cb, this);
 }
 
-Node.prototype.setSampleRate = function(interval, cb) {
-  this.xbee.setSampleRate(interval, cb, this);
+Node.prototype.setSampleInterval = function(interval, cb) {
+  this.xbee.setSampleInterval(interval, cb, this);
 }
 
 Node.prototype.getSample = function(cb) {
@@ -565,6 +565,7 @@ Node.prototype.getSample = function(cb) {
 Node.prototype.setPinMode = function(pin, mode, cb) {
   this.xbee.setPinMode(pin, mode, cb, this);
 }
+
 Node.prototype.getAnalogPin = function(pin, cb) {
   this.xbee.getAnalogPin(pin, cb, this);
 }
