@@ -1,6 +1,6 @@
   {
     "name": "svd-xbee",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "A more high level fork of Richard Morrison's node-xbee",
     "author": {
       "name": "Jan Kolkmeier",
@@ -31,8 +31,11 @@
   ],
   "homepage": "https://github.com/jouz/svd-xbee",
   "dependencies": {
-    "serialport": "1.0.5",
+    "serialport": "1.0.x",
     "async": "0.1.x"
+  },
+  "engines": {
+    "node": "0.6.x | 0.8.x"
   },
   "repository": {
     "type": "git",
