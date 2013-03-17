@@ -1,11 +1,11 @@
 var util = require('util');
-var XBee = require('../../index.js').XBee;
+var XBee = require('../../index.js');
 
 // This parser buffers data, emits chucks
 // seperated by space chars (" ")
 var Parser = require('./parser.js');
 
-var xbee = new XBee({
+var xbee = new XBee.XBee({
   port: 'COM3',   // replace with yours
   baudrate: 9600 // 9600 is default
 })
@@ -104,4 +104,28 @@ xbee.on("newNodeDiscovered", function(node) {
       // Transmission successful if err is null
     });
   });
+  
+  node.on("io", function(sample) {
+    console.log("%s> %s", node.remote64.hex, util.inspect(data)); 
+  });
+
+  // Here some functions you might find helpful:
+  node.setPinMode("DIO2", "DIGITAL_INPUT");
+  node.setPinMode("DIO3", "DIGITAL_INPUT");
+  node.setPinMode("DIO0", "DIGITAL_OUTPUT_HIGH");
+
+  node.getPinMode("DIO0", function(err, res) {
+    console.log("Pin DIO0 has mode: ", res);
+  });
+
+  // XBee will send a sample whenever one of these pins measure a change
+  node.setChangeDetection([ "DIO2", "DIO3" ]);
+
+  // Manually retrieve a sample
+  node.getSample(function(err, res) {
+    console.log("Res2:", util.inspect(res));
+  });
+  
+  // ...or instruct xbee to sample data every 5 seconds:
+  node.setSampleInterval(2000);
 });

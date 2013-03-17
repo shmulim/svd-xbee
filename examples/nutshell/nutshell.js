@@ -8,7 +8,7 @@ var xbee = new XBee({
 // Add Set to your remote node
 var robot = xbee.addNode([0x00,0x13,0xa2,0x00,0x40,0x61,0x2f,0xe4]);
 
-var robot.on("data", function(data) {
+robot.on("data", function(data) {
   console.log("robot>", data);
   if (data == "ping") robot.send("pong");
 });
