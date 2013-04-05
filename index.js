@@ -320,8 +320,9 @@ XBee.prototype.send = function(data, remote64, remote16, _cb) {
     var frame = new api.TransmitRFData();
     frame.destination64 = remote64.dec;
     frame.destination16 = remote16.dec;
-    frame.RFData = data.slice(0, C.MAX_PAYLOAD_SIZE);
-    data = data.slice(C.MAX_PAYLOAD_SIZE);
+    var length = (C.MAX_PAYLOAD_SIZE < data.length) ? C.MAX_PAYLOAD_SIZE : data.length;
+    frame.RFData = data.slice(0,  length);
+    data = data.slice(length);
     packets.push(this._makeTask({
       data: frame.getBytes(),
       cbid: C.FRAME_TYPE.ZIGBEE_TRANSMIT_STATUS + C.EVT_SEP + frame.frameId
