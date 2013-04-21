@@ -1,6 +1,6 @@
   {
     "name": "svd-xbee",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "description": "A more high level fork of Richard Morrison's node-xbee",
     "author": {
       "name": "Jan Kolkmeier",
