@@ -11,7 +11,7 @@ var XBee = require('svd-xbee');
 var xbee = new XBee({
   port: 'COM3',   // replace with yours
   baudrate: 9600 // 9600 is default
-})
+}).init();
 
 var robot = xbee.addNode([0x00,0x13,0xa2,0x00,0x40,0x61,0xaa,0xe2]);
 
