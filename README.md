@@ -1,3 +1,6 @@
+## NOTE!
+Check out [xbee-api](http://github.com/jouz/xbee-api). It separates out the API component and is aimed at being a more solid and tested module for working with XBees. New higher level modules based on [xbee-api](http://github.com/jouz/xbee-api) are in development here: [xbee-stream](http://github.com/jouz/xbee-stream) and here [xbee-nodes](http://github.com/jouz/xbee-nodes).
+
 # SVD-XBEE
 
 [Digi's xbee modules](http://www.digi.com/xbee) are good for quickly building low power wireless networks. They can be used to send/receive text data from serial ports of different devices. XBees can also be used alone for their on board digital and analog I/O capabilities.
