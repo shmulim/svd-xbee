@@ -270,10 +270,12 @@ XBee.prototype.readParameters = function(_done_cb) {
 // Add a node by hand.
 XBee.prototype.addNode = function(remote64, remote16, parser) {
   var self = this;
-  //var remote16 = [0xff,0xfe]; // Unknown
   if (!remote16 instanceof Array) {
     parser = remote16;
+  } else if (!remote16) {
+    remote16 = [0xff,0xfe]; // Unknown
   }
+  
   var node_data = {
     remote16: { dec: remote16, hex: Tools.bArr2HexStr(remote16) },
     remote64: { dec: remote64, hex: Tools.bArr2HexStr(remote64) }
