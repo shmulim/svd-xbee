@@ -39,7 +39,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/jouz/svd-xbee.git"
+    "url": "git://github.com/freakent/svd-xbee.git"
   },
   "readmeFilename": "README.md"
 }
